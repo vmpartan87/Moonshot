@@ -22,7 +22,6 @@
 [hidden]{display:none!important}
 html{height:100%;box-sizing:border-box;background:var(--bg)}
 body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 var(--f-body);overflow:hidden;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
-body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
 #bgfx{position:fixed;inset:0;pointer-events:none;background:radial-gradient(640px 420px at 88% -12%,rgba(58,216,255,.13),transparent 62%),radial-gradient(520px 520px at -12% 112%,rgba(160,123,255,.11),transparent 62%)}
 #bgfx::after{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(58,216,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(58,216,255,.04) 1px,transparent 1px);background-size:28px 28px;-webkit-mask-image:linear-gradient(180deg,#000,transparent 75%);mask-image:linear-gradient(180deg,#000,transparent 75%)}
 button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;-webkit-appearance:none;appearance:none}
@@ -312,6 +311,13 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .stamp{position:fixed;left:50%;top:42%;z-index:57;pointer-events:none;font:700 40px var(--f-display);letter-spacing:.14em;color:var(--down);border:4px solid var(--down);padding:6px 16px;border-radius:10px;text-shadow:0 0 20px var(--down);box-shadow:0 0 30px rgba(255,63,116,.5),inset 0 0 20px rgba(255,63,116,.3);animation:stamp 1.6s cubic-bezier(.2,1.4,.4,1) forwards;white-space:nowrap}
 @keyframes stamp{0%{opacity:0;transform:translate(-50%,-50%) rotate(-12deg) scale(2.4)}18%{opacity:1;transform:translate(-50%,-50%) rotate(-8deg) scale(1)}80%{opacity:1}100%{opacity:0;transform:translate(-50%,-50%) rotate(-8deg) scale(1)}}
 
+/* iPhone home-screen app: fill the whole screen and pull the tab bar closer to the bottom edge */
+html.ios-app{height:var(--app-h)}
+html.ios-app,html.ios-app body{overflow:hidden}
+html.ios-app{padding-bottom:max(10px,calc(env(safe-area-inset-bottom,0px) - 16px))}
+html.ios-app #bgfx,html.ios-app .sheet-wrap,html.ios-app .modal,html.ios-app .start{bottom:auto;height:var(--app-h)}
+html.ios-app .top{padding-top:4px}
+html.ios-app .sheet{padding-bottom:calc(16px + max(10px,env(safe-area-inset-bottom,0px) - 16px))}
 @media (prefers-reduced-motion:reduce){
   .track{animation-duration:200s}
   .app.shake,.stamp,.float,.mcard,.toast,.sheet{animation-duration:.01ms!important}
@@ -396,6 +402,8 @@ function fmtPct(x, sign = true) {
   const av = Math.abs(v);
   return s + (av >= 100 ? v.toFixed(0) : av >= 10 ? v.toFixed(1) : v.toFixed(2)) + '%';
 }
+const IOS_APP = navigator.standalone === true;
+const appH = () => IOS_APP ? Math.max(screen.height, innerHeight) : innerHeight;
 const dirCls = x => x > 0.00005 ? 'up' : x < -0.00005 ? 'down' : 'flat';
 const tpl = (s, a) => s.replace(/\{n\}/g, a ? a.n : '').replace(/\{s\}/g, a ? a.s : '');
 
@@ -1169,7 +1177,7 @@ const FX = {
   cv: null, ctx: null, parts: [], dpr: 1,
   init() {
     this.cv = $('#fx'); this.ctx = this.cv.getContext('2d');
-    const rs = () => { this.dpr = Math.min(2, window.devicePixelRatio || 1); this.cv.width = innerWidth * this.dpr; this.cv.height = innerHeight * this.dpr; };
+    const rs = () => { this.dpr = Math.min(2, window.devicePixelRatio || 1); this.cv.width = innerWidth * this.dpr; this.cv.height = innerHeight * this.dpr; this.H = innerHeight; };
     rs(); addEventListener('resize', rs);
   },
   burst(x, y, n, kind = 'win') {
@@ -1185,12 +1193,14 @@ const FX = {
   step() {
     const c = this.ctx; if (!c) return;
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    c.clearRect(0, 0, innerWidth, innerHeight);
+    c.clearRect(0, 0, innerWidth, this.H || innerHeight);
+    // hide the layer when idle so iOS can never leave stale confetti on screen
+    const vis = this.parts.length ? 'visible' : 'hidden'; if (this.cv.style.visibility !== vis) this.cv.style.visibility = vis;
     if (!this.parts.length) return;
     for (let i = this.parts.length - 1; i >= 0; i--) {
       const p = this.parts[i];
       p.vx *= .985; p.vy = p.vy * .985 + p.g; p.x += p.vx; p.y += p.vy; p.rot += p.vr; p.life++;
-      if (p.life > p.max || p.y > innerHeight + 30) { this.parts.splice(i, 1); continue; }
+      if (p.life > p.max || p.y > (this.H || innerHeight) + 30) { this.parts.splice(i, 1); continue; }
       const al = 1 - Math.max(0, (p.life - p.max * .6) / (p.max * .4));
       c.globalAlpha = al;
       c.save(); c.translate(p.x, p.y); c.rotate(p.rot);
@@ -1206,7 +1216,7 @@ const FX = {
 };
 function floatText(text, sub, cls, x, y) {
   const el = document.createElement('div'); el.className = 'float ' + cls;
-  el.style.left = (x ?? innerWidth / 2) + 'px'; el.style.top = (y ?? innerHeight * .45) + 'px';
+  el.style.left = (x ?? innerWidth / 2) + 'px'; el.style.top = (y ?? appH() * .45) + 'px';
   el.innerHTML = text + (sub ? `<small>${sub}</small>` : '');
   document.body.appendChild(el); setTimeout(() => el.remove(), 1900);
 }
@@ -1768,7 +1778,7 @@ const UI = {
   onClose(p, net, reason) {
     if (!this.started) return;
     const roe = net / p.margin, r = this.lastTap; this.lastTap = null;
-    const x = r ? r.left + r.width / 2 : innerWidth / 2, y = r ? r.top : innerHeight * .45;
+    const x = r ? r.left + r.width / 2 : innerWidth / 2, y = r ? r.top : appH() * .45;
     if (reason === 'liq') {
       SFX.play('liq'); buzz([80, 60, 200]); liquidationFx();
       this.msg(`<span class="down">LIQUIDATED</span> · ${p.sym} ${p.side.toUpperCase()} ${p.lev}× · ${fmtMoney(net, true)}`, 'bad');
@@ -1911,6 +1921,13 @@ function frame(now) {
   FX.step();
   requestAnimationFrame(frame);
 }
+function fitScreen() {
+  if (!IOS_APP) return;
+  const r = document.documentElement;
+  r.classList.add('ios-app');
+  r.style.setProperty('--app-h', appH() + 'px');
+}
+fitScreen(); addEventListener('resize', fitScreen);
 UI.init();
 FX.init();
 UI.showStart();
