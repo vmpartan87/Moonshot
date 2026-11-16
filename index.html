@@ -202,6 +202,20 @@ button:disabled{opacity:.4;cursor:default}
 .t-sk{background:rgba(255,63,116,.14);color:var(--down)}
 .nh{font:600 14px/1.35 var(--f-body);margin-top:6px;color:var(--fg);text-wrap:pretty}
 .nsince{font:700 11px var(--f-mono);margin-top:6px}
+.nitem{cursor:pointer}
+.momw{display:flex;align-items:center;gap:8px;margin-top:8px;font:700 10px var(--f-mono);color:var(--gold);min-height:24px}
+.momw.done{color:var(--dim);font-weight:600;min-height:0}
+.ml{flex:none;white-space:nowrap}
+.mbar{flex:1;min-width:30px;height:4px;border-radius:2px;background:rgba(255,200,74,.15);overflow:hidden}
+.mbar i{display:block;height:100%;width:100%;background:var(--gold);box-shadow:0 0 8px var(--gold);transition:width .5s linear}
+.qt{display:flex;gap:6px;flex:none}
+.qt button{font:700 10px/1 var(--f-display);letter-spacing:.1em;padding:6px 9px;border-radius:7px}
+.qt .ql{background:rgba(34,245,162,.14);color:var(--up);border:1px solid rgba(34,245,162,.45)}
+.qt .qs{background:rgba(255,63,116,.14);color:var(--down);border:1px solid rgba(255,63,116,.45)}
+.toast .qt{margin-top:8px}
+.toast .qt button{padding:8px 14px;font-size:11px}
+.t-ripple{background:rgba(255,200,74,.14);color:var(--gold)}
+.volb.mom{color:var(--gold);border-color:rgba(255,200,74,.5);box-shadow:0 0 12px rgba(255,200,74,.25)}
 .cal{display:flex;flex-direction:column;gap:6px}
 .calrow{display:grid;grid-template-columns:84px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border-radius:12px;background:linear-gradient(90deg,rgba(255,200,74,.09),var(--panel) 60%);border:1px solid rgba(255,200,74,.2);text-align:left;width:100%}
 .calrow .when{font:700 11px var(--f-mono);color:var(--gold)}
@@ -767,13 +781,14 @@ function pushImpact(a, imp, gap, quiet) {
   a.price = Math.max(1e-7, a.price * Math.exp(L * g));
   a.hi = Math.max(a.hi, a.price); a.lo = Math.min(a.lo, a.price);
   const rest = L * (1 - g), n = randi(15, 50);
-  if (Math.random() < .22) {        // overshoot, then give some back
+  if (Math.random() < .22) {        // overshoot, then give some back (announced with a headline)
     a.pend.push({ tot: rest + L * .25, n, d: 0 });
-    a.pend.push({ tot: -L * .25, n: randi(25, 60), d: n });
+    a.pend.push({ tot: -L * .25, n: randi(25, 60), d: n, msg: !quiet && Math.abs(L * .25) >= .03 ? (L > 0 ? 'give' : 'bounce') : null });
   } else a.pend.push({ tot: rest, n, d: 0 });
-  if (imp > 0 && !quiet && Math.random() < .1) a.pend.push({ tot: -L * .45, n: 60, d: n + 5 }); // sell the news
-  a.vm = Math.min(3.5, a.vm + Math.min(2, Math.abs(L) * 6));
+  if (imp > 0 && !quiet && Math.random() < .1) a.pend.push({ tot: -L * .45, n: 60, d: n + 5, msg: Math.abs(L * .45) >= .03 ? 'stn' : null }); // sell the news
+  a.vm = Math.min(2.4, a.vm + Math.min(1.2, Math.abs(L) * 4));
   a.trend += Math.sign(L) * Math.min(.01, Math.abs(L) * .03);
+  return n;   // how many ticks the news keeps pushing the price
 }
 function groupImpact(scope, imp, gap) {
   for (const b of alive()) {
@@ -793,16 +808,27 @@ function fire(it) {
   if (it.kind === 'out' && s) s.done = true;
   const px = a ? a.price : null;
   const gap = it.tick === 0;
-  if (it.imp) { if (a) pushImpact(a, it.imp, gap); else if (it.scope) groupImpact(it.scope, it.imp, gap); }
+  let dur = 0;
+  if (it.imp) { if (a) dur = pushImpact(a, it.imp, gap); else if (it.scope) { groupImpact(it.scope, it.imp, gap); dur = 35; } }
   if (a) fundOnNews(a, it);
-  if (it.also) for (const al of it.also) for (const b of alive()) if (b !== a && b.tags.includes(al.tag)) pushImpact(b, it.imp * al.m * rand(.7, 1.2), gap, true);
+  const rip = [];
+  if (it.also) for (const al of it.also) for (const b of alive()) if (b !== a && b.tags.includes(al.tag)) {
+    const eff = it.imp * al.m * rand(.7, 1.2); pushImpact(b, eff, gap, true);
+    if (Math.abs(eff) >= .04) rip.push(b.s + (eff > 0 ? ' ▲' : ' ▼'));
+  }
   let tag = '';
   if (it.kind === 'hint') tag = 'TIP';
   else if (it.rumor) tag = 'RUMOR';
   else if (it.kind !== 'fill' && Math.abs(it.imp || 0) >= .15) tag = 'BREAKING';
   else if (it.scope) tag = it.scope.toUpperCase();
-  addNews({ kind: it.kind, sym: it.sym || null, scope: it.scope || null, h: it.h, tag, px, rating: it.rating || null, imp: it.imp || 0, gap });
+  addNews({ kind: it.kind, sym: it.sym || null, scope: it.scope || null, h: it.h, tag, px, rating: it.rating || null, imp: it.imp || 0, gap, until: dur && it.kind !== 'fill' && Math.abs(it.imp || 0) >= .04 ? G.tick + dur : 0  /* only real movers get a pricing-in bar */ });
+  if (rip.length) addNews({ kind: 'ripple', sym: null, h: `Ripple effect: ${rip.join(', ')} on the news`, tag: 'RIPPLE', imp: 0 });
 }
+const REACT = {
+  give: a => `${a.n} gives back part of its jump as traders lock in gains`,
+  bounce: a => `${a.n} bounces off the lows as bargain hunters step in`,
+  stn: a => `Sell the news: ${a.n} slides as early buyers cash out`,
+};
 
 function addNews(n) {
   n.id = G.nid++; n.day = G.day; n.tick = G.tick;
@@ -818,23 +844,25 @@ function tick() {
   const sq = Math.sqrt(TPD);
   const m = G.mkt / TPD + .009 / sq * randn();
   const c = G.cry / TPD + .02 / sq * randn();
+  const reacts = [];
   for (const a of G.assets) {
     if (a.dead) continue;
-    const z = randn() * (Math.random() < .02 ? 2.6 : 1);
+    const z = randn() * (Math.random() < .01 ? 2.4 : 1);
     let r = a.trend / TPD + a.v / sq * a.vm * z;
     r += a.t === 'stock' ? a.b * m : a.t === 'crypto' ? a.b * c : a.b * m * .5;
     for (let i = a.pend.length - 1; i >= 0; i--) {
       const p = a.pend[i];
-      if (p.d > 0) { p.d--; continue; }
+      if (p.d > 0) { p.d--; if (p.d === 0 && p.msg) reacts.push([a, p.msg]); continue; }
       const take = p.n <= 1 ? p.tot : p.tot / p.n * rand(.3, 1.7);
       p.tot -= take; p.n--; r += take;
       if (p.n <= 0) a.pend.splice(i, 1);
     }
-    a.vm = clamp(a.vm * .985 + .015 * Math.abs(z) * 1.25, .6, 3.5);
+    a.vm = clamp(a.vm * .985 + .015 * Math.abs(z) * 1.25, .6, 2.4);
     a.price = Math.max(1e-7, a.price * Math.exp(r));
     a.hi = Math.max(a.hi, a.price); a.lo = Math.min(a.lo, a.price);
     a.ticks.push(a.price);
   }
+  for (const [a, m] of reacts) addNews({ kind: 'react', sym: a.s, h: REACT[m](a), tag: '', px: a.price, imp: 0 });
   const due = G.queue.filter(it => it.day === G.day && it.tick === G.tick);
   if (due.length) { G.queue = G.queue.filter(it => !due.includes(it)); due.forEach(fire); }
   checkBankrupt();
@@ -1480,7 +1508,7 @@ const UI = {
       <div class="mlist">
         <div class="li"><b>1</b><span>Tap an asset. <span class="up">LONG</span> bets the price rises, <span class="down">SHORT</span> bets it falls.</span></div>
         <div class="li"><b>2</b><span>Leverage multiplies gains <i>and</i> losses. Lose 95% of your stake and you get <span class="down">liquidated</span>.</span></div>
-        <div class="li"><b>3</b><span>News moves prices. The move keeps rolling for a while after the headline, so fast hands win.</span></div>
+        <div class="li"><b>3</b><span>Trade the headline, fast. While a headline shows the gold <b style="color:var(--gold);width:auto">Pricing in</b> bar, the move keeps rolling. Jump in early, take profit when the bar runs out.</span></div>
         <div class="li"><b>4</b><span>Teasers set up big events weeks ahead. Watch the <b style="color:var(--gold);width:auto">Upcoming</b> calendar and the tips.</span></div>
         <div class="li"><b>5</b><span>Each 5-minute session is one trading week, Monday to Friday. Open positions stay open over the weekend.</span></div>
       </div>
@@ -1512,6 +1540,7 @@ const UI = {
       if (!this.restartArm) { this.restartArm = true; b.textContent = 'Tap again to confirm'; return; }
       this.restartArm = false; wipeSave(); newGame(); this.nwShown = START_CASH; this.tab = 'markets'; this.renderTape(); this.render(); this.intro();
     }
+    else if (act === 'qt') { this.openAsset(b.dataset.sym); this.openSheet(b.dataset.side); }
     else if (act === 'sound') { SFX.on = !SFX.on; this.saveSettings(); this.ctrls(); this.render(); }
   },
 
@@ -1575,7 +1604,7 @@ const UI = {
     const stat = (l, f) => `<div class="stat"><div class="lbl">${l}</div><b class="num" data-f="${f}"></b></div>`;
     return `<div class="dhead"><button class="back" data-act="back" aria-label="Back">${ICON.back}</button>
         <span class="logo" style="--c:${a.c}">${a.s[0]}</span>
-        <div class="dn"><b>${a.s}</b><small>${a.n} · ${TYPE_NAME[a.t]}</small></div><span class="volb" data-f="vol"></span></div>
+        <div class="dn"><b>${a.s}</b><small>${a.n} · ${TYPE_NAME[a.t]}</small></div><span class="volb mom" data-f="dmom" hidden></span><span class="volb" data-f="vol"></span></div>
       <div class="dprice"><b data-f="px"></b><span class="pill" data-f="ch"></span></div>
       <div class="tfs">${[['1D', 'This week'], ['1M', '6 months'], ['3M', '2 years']].map(([k, l]) => `<button class="tf ${this.tf === k ? 'on' : ''}" data-act="tf" data-v="${k}">${l}</button>`).join('')}</div>
       <div class="chartbox"><canvas id="chart" aria-label="${a.s} price chart"></canvas></div>
@@ -1599,6 +1628,8 @@ const UI = {
     const set = (f, t) => { const el = v.querySelector(`[data-f=${f}]`); if (el) el.textContent = t; };
     set('px', a.dead ? 'HALTED' : fmtPrice(a.price));
     const pl = v.querySelector('[data-f=ch]'); pl.textContent = a.dead ? 'DELISTED' : fmtPct(c); pl.className = 'pill ' + (a.dead ? 'down' : dirCls(c));
+    const mn = G.news.find(n => n.sym === a.s && this.momLeft(n) > 0), mc = v.querySelector('[data-f=dmom]');
+    if (mc) { mc.hidden = !mn; if (mn) mc.textContent = `NEWS MOVE · ${Math.ceil(this.momLeft(mn) * TICK_MS / 1000 / this.speed)}s`; }
     const vv = a.v * a.vm, vb = v.querySelector('[data-f=vol]');
     vb.textContent = vv < .03 ? 'CALM' : vv < .06 ? 'ACTIVE' : vv < .1 ? 'WILD' : 'EXTREME';
     vb.className = 'volb ' + (vv >= .1 ? 'extreme' : vv >= .06 ? 'wild' : '');
@@ -1667,8 +1698,19 @@ const UI = {
   },
   newsItems(list, empty) {
     if (!list.length) return `<div class="empty">${empty}</div>`;
-    return list.map(n => `<button class="nitem ${n.tag === 'BREAKING' ? 'brk' : ''} ${n.kind === 'fill' ? 'fill' : ''}" ${n.sym && A(n.sym) ? `data-act="asset" data-sym="${n.sym}"` : ''} data-nid="${n.id}">
-      ${this.newsMeta(n)}<div class="nh">${n.h}</div>${n.sym && n.px ? '<div class="nsince" data-f="since"></div>' : ''}</button>`).join('');
+    return list.map(n => `<div class="nitem ${n.tag === 'BREAKING' ? 'brk' : ''} ${n.kind === 'fill' ? 'fill' : ''}" role="button" tabindex="0" ${n.sym && A(n.sym) ? `data-act="asset" data-sym="${n.sym}"` : ''} data-nid="${n.id}">
+      ${this.newsMeta(n)}<div class="nh">${n.h}</div>${n.sym && n.px ? '<div class="nsince" data-f="since"></div>' : ''}${n.sym && n.until ? '<div class="momw" data-f="mom"></div>' : ''}</div>`).join('');
+  },
+  momLeft(n) { return n.until && n.day === G.day && G.tick < n.until ? n.until - G.tick : 0; },
+  qtHTML(sym) { return `<span class="qt"><button class="ql" data-act="qt" data-side="long" data-sym="${sym}">▲ LONG</button><button class="qs" data-act="qt" data-side="short" data-sym="${sym}">▼ SHORT</button></span>`; },
+  liveMom(el, n) {
+    const m = el.querySelector('[data-f=mom]'); if (!m) return;
+    const left = this.momLeft(n), a = A(n.sym);
+    if (left > 0 && a && !a.dead) {
+      if (m.dataset.st !== 'live') { m.dataset.st = 'live'; m.className = 'momw'; m.innerHTML = `<span class="ml"></span><div class="mbar"><i></i></div>${this.qtHTML(n.sym)}`; }
+      m.querySelector('.ml').textContent = `Pricing in · ${Math.ceil(left * TICK_MS / 1000 / this.speed)}s`;
+      m.querySelector('.mbar i').style.width = (left / (n.until - n.tick) * 100) + '%';
+    } else if (m.dataset.st !== 'done') { m.dataset.st = 'done'; m.className = 'momw done'; m.textContent = 'Fully priced in'; }
   },
   liveSince() {
     $$('#view .nitem').forEach(el => {
@@ -1677,6 +1719,7 @@ const UI = {
       const a = A(n.sym);
       if (!a || a.dead) { s.textContent = 'Delisted'; s.className = 'nsince down'; return; }
       const d = a.price / n.px - 1; s.textContent = `${fmtPct(d)} since headline`; s.className = 'nsince ' + dirCls(d);
+      this.liveMom(el, n);
     });
   },
 
@@ -1695,6 +1738,14 @@ const UI = {
         <div class="stat"><div class="lbl">Worst trade</div><b class="down">${fmtMoney(G.stats.worst, true)}</b></div>
         <div class="stat"><div class="lbl">Bailouts</div><b>${G.bailouts}</b></div>
         <div class="stat"><div class="lbl">Liquidations</div><b>${G.stats.liqs}</b></div></div></div>
+      <div class="sec"><h3>Trader's playbook</h3><div class="mlist" style="margin-top:0">
+        <div class="li"><b>1</b><span><strong style="color:var(--fg)">Trade the headline, not the chart.</strong> Good news: LONG. Bad news: SHORT. Without news, prices mostly wander.</span></div>
+        <div class="li"><b>2</b><span><strong style="color:var(--fg)">Speed pays.</strong> Use the LONG/SHORT buttons on the headline itself. The gold bar shows how long the news keeps pushing.</span></div>
+        <div class="li"><b>3</b><span><strong style="color:var(--fg)">Cash out when the bar runs out.</strong> After that the edge is gone and reversals start.</span></div>
+        <div class="li"><b>4</b><span><strong style="color:var(--fg)">Fundamentals are the slow tide.</strong> Strong, cheap companies drift up over weeks; weak, indebted ones sink.</span></div>
+        <div class="li"><b>5</b><span><strong style="color:var(--fg)">Big events are coin flips.</strong> Teasers and tips tilt the odds, they don't guarantee. Bet small before outcomes.</span></div>
+        <div class="li"><b>6</b><span><strong style="color:var(--fg)">Leverage is a tool, not a plan.</strong> 2–5× on news trades. High leverage on a stake you can't lose is how accounts die.</span></div>
+      </div></div>
       <div class="sec"><h3>Settings</h3><div class="setrow"><button class="btn2" data-act="sound">Sound: ${SFX.on ? 'On' : 'Off'}</button><button class="btn2 danger" data-act="restart">Restart career</button></div></div>`;
   },
 
@@ -1760,14 +1811,21 @@ const UI = {
   },
   toast(n) {
     const box = $('#toasts'); $('#app').style.setProperty('--toast-top', ($('#top').offsetHeight + 34) + 'px');
-    const el = document.createElement('button');
-    const cls = n.tag === 'BREAKING' ? 'brk' : n.tag === 'RUMOR' ? 'rumor' : n.tag === 'TIP' ? 'tip' : '';
+    const el = document.createElement('div'); el.setAttribute('role', 'button');
+    const cls = n.tag === 'BREAKING' ? 'brk' : n.tag === 'RUMOR' ? 'rumor' : n.tag === 'TIP' ? 'tip' : n.tag === 'RIPPLE' ? 'tip' : '';
     el.className = 'toast ' + cls;
-    el.innerHTML = `${this.newsMeta(n)}<div class="th">${n.h}</div>`;
-    el.onclick = () => { SFX.play('tap'); if (n.sym && A(n.sym)) this.openAsset(n.sym); el.remove(); };
+    const live = n.sym && A(n.sym) && !A(n.sym).dead && n.kind !== 'dead';
+    el.innerHTML = `${this.newsMeta(n)}<div class="th">${n.h}</div>${live ? this.qtHTML(n.sym) : ''}`;
+    el.onclick = e => {
+      SFX.play('tap');
+      const q = e.target.closest('[data-act=qt]');
+      if (q) { this.openAsset(q.dataset.sym); this.openSheet(q.dataset.side); }
+      else if (n.sym && A(n.sym)) this.openAsset(n.sym);
+      el.remove();
+    };
     box.prepend(el);
     while (box.children.length > 2) box.lastChild.remove();
-    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 320); }, n.tag === 'BREAKING' ? 6000 : 4500);
+    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 320); }, n.tag === 'BREAKING' ? 8000 : 6000);
   },
   msg(html, cls) {
     const box = $('#toasts'); $('#app').style.setProperty('--toast-top', ($('#top').offsetHeight + 34) + 'px');
